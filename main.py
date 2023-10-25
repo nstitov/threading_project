@@ -1,18 +1,16 @@
-from typing import Generator
-
-import requests
 import concurrent.futures
-import queue
-import threading
-
-import time
 import csv
+import functools
 import os
 import os.path
-import functools
+import queue
+import threading
+import time
 from datetime import datetime, timezone
+from typing import Generator
 
 import matplotlib.pyplot as plt
+import requests
 
 
 class TickersDownloader:
@@ -22,13 +20,13 @@ class TickersDownloader:
         self.url_yahoo = 'https://query1.finance.yahoo.com/v8/finance/chart/'
         self.data_queue = queue.Queue()
 
-    
+
     def _get_ticker(self) -> Generator[str, None, None]:
         with open(self.ticker_names_file, 'r', encoding='utf-8') as ticker_file:
             for line in ticker_file:
                 ticker = line.strip()
                 yield ticker
-    
+
 
     def _get_history_data(self, ticker_name: str, start_date: datetime, end_date: datetime = datetime.utcnow(), interval: str = '1d') -> dict:
         params = {'period1': str(int(start_date.replace(tzinfo=timezone.utc).timestamp())),
@@ -42,13 +40,13 @@ class TickersDownloader:
             response = requests.get(url, params=params, headers=headers)
         except Exception as err:
             raise Exception(f'Ошибка при загрузке данных для {ticker_name}: {err}.')
-        
+
         if response.status_code == 200:
             return response.json()
         else:
             raise Exception(f'Запрос для загрузки данных для {ticker_name} отклонен сервером.')
 
-    
+
     def _format_data(self, json_data: dict) -> list[dict]:
         ticker_symbol = json_data['chart']['result'][0]['meta']['symbol']
         ticker_adjclose = json_data['chart']['result'][0]['indicators']['adjclose'][0]['adjclose']
@@ -72,7 +70,7 @@ class TickersDownloader:
     def _put_data_to_queue(future: concurrent.futures.Future, queue: queue.Queue) -> None:
         queue.put(future.result())
         print('В очередь добавлены данные.')
-    
+
 
     @staticmethod
     def _load_data_to_csv(future: concurrent.futures.Future) -> None:
@@ -81,7 +79,7 @@ class TickersDownloader:
         ticker_adjclose = json_data['chart']['result'][0]['indicators']['adjclose'][0]['adjclose']
         ticker_timestamp = json_data['chart']['result'][0]['timestamp']
         data = [{'timestamp': timestamp, 'adjclose': f'{adjclose:0.2f}'} for adjclose, timestamp in zip(ticker_adjclose, ticker_timestamp)]
-        
+
         os.makedirs('tickers_data', exist_ok=True)
         with open(f'tickers_data/{ticker_symbol}.csv', 'w', encoding='utf-8', newline='') as csv_file:
             csv_writer = csv.DictWriter(csv_file, fieldnames=['timestamp', 'adjclose'])
@@ -95,9 +93,9 @@ class TickersDownloader:
             csv_reader = csv.reader(source)
             header = csv_reader.__next__()
             data = [line for line in csv_reader]
-            
+
         data.sort(key=lambda line: int(line[1]))
-            
+
         with open(f'{csv_file_name[:-4]}_sorted.csv', 'w', encoding='utf-8', newline='') as dest:
             csv_writer = csv.writer(dest)
             csv_writer.writerow(header)
@@ -114,13 +112,13 @@ class TickersDownloader:
 
         self.data_queue.join()
 
-    
+
     def download_data_sep_files(self, start_date: datetime, end_date: datetime, interval) -> None:
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for ticker in self._get_ticker():
                 future = executor.submit(self._get_history_data, ticker, start_date, end_date, interval)
                 future.add_done_callback(self._load_data_to_csv)
-        
+
 
 class TickerHandler:
     def __init__(self, tickers_data_folder: str = 'tickers_data'):
@@ -129,7 +127,7 @@ class TickerHandler:
         self.lock = threading.Lock()
         self.data = {}
 
-    
+
     def _get_ticker_filename(self) -> Generator[str, None, None]:
         for file in os.listdir(self.tickers_folder):
             if file.endswith('.csv'):
@@ -147,10 +145,10 @@ class TickerHandler:
                 data = [[int(timestamp), start_price, 100]]
                 for timestamp, price in csv_reader:
                     data.append([int(timestamp), float(price), round(100 * float(price) / start_price, 2)])
-            
+
             with self.lock:
                 self.data[filename[:-4]] = data
-            
+
             print(f'Данные для тикера {filename[:-4]} обработаны')
 
 
@@ -167,9 +165,9 @@ class TickerHandler:
             for dt, _, adj_price in data:
                 dts.append(datetime.fromtimestamp(dt))
                 adj_prices.append(adj_price)
-            
+
             plt.plot(dts, adj_prices, label=ticker)
-        
+
         plt.legend()
         plt.grid(visible=True, which='both')
         plt.xlim(dts[0], dts[-1])
@@ -192,5 +190,5 @@ if __name__ == '__main__':
     handler = TickerHandler()
     handler.collect_data()
     handler.plot_graphic()
-    
+
     print(time.perf_counter() - start_time)
